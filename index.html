@@ -46,6 +46,7 @@
   .controls button:hover { color: var(--ink); }
   .controls button::before { content: "[ "; } .controls button::after { content: " ]"; }
   .controls .primary { color: var(--ink); font-weight: 600; }
+  .controls #music[aria-pressed="false"] { text-decoration: line-through; text-decoration-color: var(--faint); }
   .status { font-size: 11px; color: var(--muted); margin-top: 10px; min-height: 1.3em; }
 
   .settings { position: fixed; top: calc(40px + env(safe-area-inset-top, 0px)); right: max(16px, env(safe-area-inset-right, 0px));
@@ -54,7 +55,8 @@
   .settings label { display: flex; justify-content: space-between; align-items: center; gap: 10px; padding: 4px 0; color: var(--muted); }
   .settings input[type="number"] { width: 52px; font: inherit; color: var(--ink); background: transparent; border: 0;
     border-bottom: 1px dashed var(--faint); text-align: right; font-variant-numeric: tabular-nums; }
-  .settings input[type="checkbox"] { accent-color: var(--ink); }
+  .settings input[type="checkbox"], .settings input[type="range"] { accent-color: var(--ink); }
+  .settings input[type="range"] { width: 110px; }
   .settings p { margin: 10px 0 0; font-size: 10.5px; color: var(--muted); line-height: 1.5; }
 </style>
 <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;400;600&display=swap" rel="stylesheet">
@@ -78,6 +80,7 @@
     <button type="button" class="primary" id="toggle">start</button>
     <button type="button" id="reset">reset</button>
     <button type="button" id="skip">skip</button>
+    <button type="button" id="music" aria-pressed="true">music on</button>
   </div>
   <div class="status" id="status" aria-live="polite">space: start/pause · r: reset · n: skip</div>
 </main>
@@ -91,6 +94,9 @@
   <label for="s-autobreak">auto-start breaks <input id="s-autobreak" type="checkbox"></label>
   <label for="s-autofocus">auto-start focus <input id="s-autofocus" type="checkbox"></label>
   <label for="s-sound">chime <input id="s-sound" type="checkbox"></label>
+  <label for="s-mvol">music volume <input id="s-mvol" type="range" min="0" max="100" step="1"></label>
+  <label for="s-mbreak">music during breaks <input id="s-mbreak" type="checkbox"></label>
+  <p>Music: 「灯の消えた町」 re-arranged as a night sky. It plays while you focus and fades out when you pause.</p>
   <p>Each focus session is one night: dusk 19:00 to dawn 05:00. Each break is one day: sunrise 06:00 to sunset 18:00. The camera shutter stays open while you focus, so star trails grow with your work.</p>
 </section>
 
@@ -99,7 +105,7 @@
   // ============================================================
   //  Timer
   // ============================================================
-  const DEF = { focus: 25, short: 5, long: 15, every: 4, autoBreak: true, autoFocus: false, sound: true };
+  const DEF = { focus: 25, short: 5, long: 15, every: 4, autoBreak: true, autoFocus: false, sound: true, music: true, musicVol: 60, musicBreaks: false };
   const S = { ...DEF };
   try { Object.assign(S, JSON.parse(localStorage.getItem('stp-settings') || '{}')); } catch (e) {}
   const saveS = () => { try { localStorage.setItem('stp-settings', JSON.stringify(S)); } catch (e) {} };
@@ -136,8 +142,185 @@
     });
   }
 
+  // ============================================================
+  //  Music: 「灯の消えた町」夜空編
+  //  Melody and harmony come from the original movement "灯の消えた町 / Lanterns at Dusk"
+  //  (C minor, 3/4, form A–A–B–A–B–A, 48 bars). Re-voiced for a night sky:
+  //  original tempo, add9 / maj7 colours, a music-box melody (the only bell-like voice),
+  //  low strings, a warm counter-voice and a distant choir.
+  // ============================================================
+  const music = (() => {
+    const PC = { C: 0, 'C#': 1, Db: 1, D: 2, 'D#': 3, Eb: 3, E: 4, F: 5, 'F#': 6, Gb: 6, G: 7, 'G#': 8, Ab: 8, A: 9, 'A#': 10, Bb: 10, B: 11 };
+    const IV = { '': [0, 4, 7], m: [0, 3, 7] };
+    const note = n => { const m = n.match(/^([A-G][#b]?)(-?\d)$/); return 12 * (+m[2] + 1) + PC[m[1]]; };
+    const chord = n => { const m = n.match(/^([A-G][#b]?)(.*)$/); return { root: PC[m[1]], iv: IV[m[2]], minor: m[2] === 'm' }; };
+    const hz = m => 440 * Math.pow(2, (m - 69) / 12);
+    const mel = s => s.trim().split(/\s+/).map(t => { const [n, d] = t.split(':'); return { m: n === 'r' ? null : note(n), d: +d }; });
+    const sec = (c, m) => ({ chords: c.split(' '), melody: mel(m) });
+    const A = sec('Cm Ab Eb Bb Cm Fm G G', 'G4:2 Eb4:1  C5:2 Bb4:0.5 Ab4:0.5  G4:3  F4:1 G4:1 Bb4:1  C5:2 D5:1  Eb5:1.5 D5:0.5 C5:1  B4:2 D5:1  G4:3');
+    const B = sec('Eb Bb Cm Ab Fm Bb Eb G', 'Eb5:2 G5:1  F5:2 D5:1  Eb5:1.5 D5:0.5 C5:1  Ab4:3  C5:1 Ab4:1 F4:1  D5:2 Bb4:1  G4:2 Bb4:1  B4:2 D5:1');
+    const FORM = [[A, 0, 'A'], [A, 1, 'A'], [B, 1, 'B'], [A, 2, 'A'], [B, 2, 'B'], [A, 3, 'A']];
+    const BPB = 3, BPM = 76, SPB = 60 / BPM;
+    const TITLE = '灯の消えた町 — 夜空編';
+
+    // ---- score
+    const score = (() => {
+      const ev = []; let off = 0;
+      FORM.forEach(([s, L], si) => {
+        s.chords.forEach((cn, b) => {
+          const c = chord(cn), base = off + b * BPB, r = 48 + c.root - (c.root >= 8 ? 12 : 0), t = c.iv.map(i => r + i);
+          const colour = c.minor ? r + 14 : r + 11;                       // minor → add9, major → maj7: the night colour
+          [r + 12, t[1] + 12, r + 19, colour + 12].forEach(m => ev.push({ b: base, v: 'pad', m, d: BPB + 0.4, g: 0.8 }));
+          ev.push({ b: base, v: 'sub', m: r - 12, d: BPB, g: 1 });
+          if (L >= 3) [r + 12, t[1] + 12, t[2] + 12].forEach(m => ev.push({ b: base, v: 'choir', m, d: BPB + 0.4, g: 0.7 }));
+        });
+        // melody: music box from the second section, a warm hum underneath from the fourth
+        let tt = off;
+        s.melody.forEach(n => {
+          if (n.m !== null) {
+            if (L >= 1) ev.push({ b: tt, v: 'box', m: n.m + 12, d: n.d, g: 1, mel: true });
+            if (L >= 2) ev.push({ b: tt, v: 'hum', m: n.m - 12, d: n.d, g: 0.8 });
+          }
+          tt += n.d;
+        });
+        off += s.chords.length * BPB;
+      });
+      // silent cue: a meteor crosses the sky on the last bar of the form
+      ev.push({ b: off - BPB + 1, v: 'cue', m: 0, d: 0, g: 0, meteor: true });
+      ev.sort((a, b) => a.b - b.b);
+      return { ev, len: off };
+    })();
+
+    // ---- voices
+    let ctx, out, verb, noise, live = null, timer = 0, ptr = 0, loopOff = 0, anchorBeat = 0, anchorTime = 0, resumeBeat = 0;
+    const hits = [];
+    const o = (type, f, t) => { const x = ctx.createOscillator(); x.type = type; x.frequency.setValueAtTime(f, t); return x; };
+    function env(g, t, a, peak, hold, rel) {
+      g.gain.setValueAtTime(0, t); g.gain.linearRampToValueAtTime(peak, t + a);
+      g.gain.setValueAtTime(peak, t + Math.max(a, hold)); g.gain.linearRampToValueAtTime(0, t + Math.max(a, hold) + rel);
+      return t + Math.max(a, hold) + rel + 0.05;
+    }
+    function pan(dest, p) { if (!ctx.createStereoPanner) return dest; const sp = ctx.createStereoPanner(); sp.pan.value = p; sp.connect(dest); return sp; }
+    const V = {
+      cue() {},
+      pad(t, m, d, g, dest) {          // dark, slow strings
+        const f = ctx.createBiquadFilter(); f.type = 'lowpass'; f.frequency.value = 820; f.Q.value = 0.4;
+        const a = ctx.createGain(); f.connect(a).connect(dest);
+        const end = env(a, t, Math.min(1.4, d * 0.5), g * 0.022, d, 2.4);
+        [-8, 0, 8].forEach(dt => { const x = o('sawtooth', hz(m), t); x.detune.value = dt; x.connect(f); x.start(t); x.stop(end); });
+      },
+      sub(t, m, d, g, dest) {
+        const a = ctx.createGain(); a.connect(dest); const end = env(a, t, 0.2, g * 0.12, d * 0.95, 1.2);
+        const x = o('sine', hz(m), t); x.connect(a); x.start(t); x.stop(end);
+      },
+      box(t, m, d, g, dest) {          // music box: bright attack, glassy partial, long ring
+        const a = ctx.createGain(); a.connect(dest);
+        a.gain.setValueAtTime(0, t); a.gain.linearRampToValueAtTime(g * 0.085, t + 0.004); a.gain.exponentialRampToValueAtTime(0.0001, t + 2.6 + d * 0.4);
+        const x1 = o('sine', hz(m), t), x2 = o('sine', hz(m) * 3.01, t), x3 = o('sine', hz(m) * 5.4, t);
+        const g2 = ctx.createGain(), g3 = ctx.createGain();
+        g2.gain.setValueAtTime(0.35, t); g2.gain.exponentialRampToValueAtTime(0.001, t + 0.6);
+        g3.gain.setValueAtTime(0.12, t); g3.gain.exponentialRampToValueAtTime(0.001, t + 0.15);
+        x1.connect(a); x2.connect(g2).connect(a); x3.connect(g3).connect(a);
+        const end = t + 3.2 + d * 0.4; [x1, x2, x3].forEach(x => { x.start(t); x.stop(end); });
+      },
+      hum(t, m, d, g, dest) {          // warm low counter-voice
+        const f = ctx.createBiquadFilter(); f.type = 'lowpass'; f.frequency.value = 650;
+        const a = ctx.createGain(); f.connect(a).connect(dest);
+        const end = env(a, t, 0.25, g * 0.05, d * 0.95, 0.8);
+        const x = o('triangle', hz(m), t); x.connect(f); x.start(t); x.stop(end);
+        const l = o('sine', 4.6, t), lg = ctx.createGain(); lg.gain.setValueAtTime(0, t); lg.gain.linearRampToValueAtTime(9, t + 0.6);
+        l.connect(lg).connect(x.detune); l.start(t); l.stop(end);
+      },
+      glass(t, m, d, g, dest) {
+        const p = pan(dest, (Math.random() - 0.5) * 0.7), a = ctx.createGain(); a.connect(p);
+        a.gain.setValueAtTime(0, t); a.gain.linearRampToValueAtTime(g * 0.028, t + 0.02); a.gain.exponentialRampToValueAtTime(0.0001, t + 2.2);
+        const x = o('sine', hz(m), t), y = o('sine', hz(m) * 2.002, t), gy = ctx.createGain(); gy.gain.value = 0.25;
+        x.connect(a); y.connect(gy).connect(a); [x, y].forEach(z => { z.start(t); z.stop(t + 2.3); });
+      },
+      star(t, m, d, g, dest) {         // a twinkle somewhere in the sky
+        const p = pan(dest, (Math.random() - 0.5) * 1.6), a = ctx.createGain(); a.connect(p);
+        a.gain.setValueAtTime(0, t); a.gain.linearRampToValueAtTime(g * 0.05, t + 0.003); a.gain.exponentialRampToValueAtTime(0.0001, t + 3.5);
+        const x = o('sine', hz(m), t), y = o('sine', hz(m) * 4.2, t), gy = ctx.createGain();
+        gy.gain.setValueAtTime(0.3, t); gy.gain.exponentialRampToValueAtTime(0.001, t + 0.25);
+        x.connect(a); y.connect(gy).connect(a); [x, y].forEach(z => { z.start(t); z.stop(t + 3.6); });
+      },
+      choir(t, m, d, g, dest) {
+        const a = ctx.createGain(), sum = ctx.createGain(); a.connect(dest);
+        [[600, 1], [1040, 0.5], [2400, 0.15]].forEach(([fq, amp]) => {
+          const bp = ctx.createBiquadFilter(); bp.type = 'bandpass'; bp.frequency.value = fq; bp.Q.value = 5;
+          const ag = ctx.createGain(); ag.gain.value = amp; sum.connect(bp).connect(ag).connect(a);
+        });
+        const end = env(a, t, 1.4, g * 0.14, d, 2.6);
+        [-10, 0, 10].forEach(dt => { const x = o('sawtooth', hz(m), t); x.detune.value = dt; x.connect(sum); x.start(t); x.stop(end); });
+      },
+    };
+
+    function init() {
+      ctx = audio; out = ctx.createGain(); out.gain.value = 0;
+      const comp = ctx.createDynamicsCompressor(); comp.threshold.value = -18; comp.ratio.value = 3;
+      out.connect(comp).connect(ctx.destination);
+      // long night reverb
+      const sec = 6, len = Math.round(ctx.sampleRate * sec), ir = ctx.createBuffer(2, len, ctx.sampleRate);
+      for (let ch = 0; ch < 2; ch++) { const dd = ir.getChannelData(ch); let last = 0;
+        for (let i = 0; i < len; i++) { last = last * 0.6 + (Math.random() * 2 - 1) * 0.4; dd[i] = last * Math.pow(1 - i / len, 3); } }
+      verb = ctx.createConvolver(); verb.buffer = ir; const wet = ctx.createGain(); wet.gain.value = 0.7; verb.connect(wet).connect(comp);
+    }
+    const level = () => Math.pow((S.musicVol ?? 60) / 100, 1.6) * 0.9;
+    const nowBeat = () => anchorBeat + (ctx.currentTime - anchorTime) / SPB;
+
+    function schedule() {
+      if (!live) return;
+      const horizon = ctx.currentTime + (document.hidden ? 1.6 : 0.3);     // background tabs tick only once a second
+      for (;;) {
+        if (ptr >= score.ev.length) { ptr = 0; loopOff += score.len; }
+        const e = score.ev[ptr], t = anchorTime + (e.b + loopOff - anchorBeat) * SPB;
+        if (t > horizon) break;
+        if (t >= ctx.currentTime - 0.02) {
+          V[e.v](Math.max(t, ctx.currentTime), e.m, e.d * SPB, e.g * (0.9 + Math.random() * 0.1), live.bus);
+          if (e.meteor || e.mel) hits.push({ t, kind: e.meteor ? 'meteor' : e.v });
+        }
+        ptr++;
+      }
+    }
+    function play() {
+      if (!audio) return;
+      if (!out) init();
+      const bus = ctx.createGain(); bus.connect(out); const send = ctx.createGain(); send.gain.value = 0.6; bus.connect(send).connect(verb);
+      live = { bus };
+      anchorBeat = resumeBeat; anchorTime = ctx.currentTime + 0.12; loopOff = 0;
+      ptr = score.ev.findIndex(e => e.b >= resumeBeat); if (ptr < 0) ptr = 0;
+      out.gain.cancelScheduledValues(ctx.currentTime); out.gain.setValueAtTime(out.gain.value, ctx.currentTime);
+      out.gain.linearRampToValueAtTime(level(), ctx.currentTime + 2);
+      clearInterval(timer); timer = setInterval(schedule, 25); schedule();
+    }
+    function stop() {
+      if (!live) return;
+      clearInterval(timer);
+      const b = nowBeat();
+      resumeBeat = Math.max(0, Math.floor((Math.max(0, b) % score.len) / BPB) * BPB);   // resume from the start of the bar
+      const old = live.bus, t = ctx.currentTime;
+      old.gain.setValueAtTime(1, t); old.gain.linearRampToValueAtTime(0, t + 1.5);
+      setTimeout(() => old.disconnect(), 2500);
+      live = null; hits.length = 0;
+    }
+    return {
+      title: TITLE,
+      get playing() { return !!live; },
+      update(want) { if (want && !live && audio && audio.state === 'running') play(); else if (!want && live) stop(); },
+      rewind() { resumeBeat = 0; if (live) { stop(); resumeBeat = 0; } },
+      volume() { if (out && live) out.gain.setTargetAtTime(level(), ctx.currentTime, 0.1); },
+      drain(fn) { if (!ctx) return; while (hits.length && hits[0].t <= ctx.currentTime) fn(hits.shift().kind); },
+      where() {
+        if (!live) return '';
+        const b = Math.max(0, nowBeat()) % score.len, si = Math.min(5, Math.floor(b / 24)), bar = Math.floor((b % 24) / BPB) + 1;
+        return `${FORM[si][2]} ${si + 1}/6 · bar ${bar}/8`;
+      },
+    };
+  })();
+  const wantMusic = () => S.music && running && (mode === 'focus' || S.musicBreaks);
+
   function setMode(m, autostart) {
-    if (mode !== 'focus' && m === 'focus') { simDay++; clearTrails(); }
+    if (mode !== 'focus' && m === 'focus') { simDay++; clearTrails(); music.rewind(); }
     mode = m; running = false; remaining = dur(m);
     document.querySelectorAll('[data-mode]').forEach(b => b.setAttribute('aria-pressed', String(b.dataset.mode === m)));
     if (autostart) start();
@@ -149,7 +332,7 @@
     endAt = Date.now() + remaining; running = true; render();
   }
   function pause() { tick(); running = false; render(); }
-  function reset() { running = false; remaining = dur(mode); if (mode === 'focus') clearTrails(); say('Reset.'); render(); }
+  function reset() { running = false; remaining = dur(mode); if (mode === 'focus') { clearTrails(); music.rewind(); } say('Reset.'); render(); }
   function next(counted) {
     running = false;
     if (mode === 'focus') {
@@ -214,7 +397,15 @@
   };
   bindNum('s-focus', 'focus', 1, 120); bindNum('s-short', 'short', 1, 60); bindNum('s-long', 'long', 1, 90); bindNum('s-every', 'every', 2, 8);
   const bindBool = (id, key) => { const el = $(id); el.checked = S[key]; el.addEventListener('change', () => { S[key] = el.checked; saveS(); }); };
-  bindBool('s-autobreak', 'autoBreak'); bindBool('s-autofocus', 'autoFocus'); bindBool('s-sound', 'sound');
+  bindBool('s-autobreak', 'autoBreak'); bindBool('s-autofocus', 'autoFocus'); bindBool('s-sound', 'sound'); bindBool('s-mbreak', 'musicBreaks');
+  const mvol = $('s-mvol'); mvol.value = S.musicVol;
+  mvol.addEventListener('input', () => { S.musicVol = +mvol.value; saveS(); music.volume(); });
+  const musicBtn = $('music');
+  const showMusic = () => { musicBtn.textContent = S.music ? 'music on' : 'music off'; musicBtn.setAttribute('aria-pressed', String(S.music)); };
+  musicBtn.onclick = () => { ensureAudio(); S.music = !S.music; saveS(); showMusic(); say(S.music ? '♪ ' + music.title : 'Music off.'); };
+  showMusic();
+  // keep the timer honest in background tabs (requestAnimationFrame stops there)
+  setInterval(() => { tick(); music.update(wantMusic()); }, 500);
 
   // ============================================================
   //  Sky clock
@@ -365,6 +556,14 @@
     if (W < 2 || H < 2) return;
     if (atlasKey !== CELL + ':' + dpr) buildAtlas();
     tick(); render();
+    music.update(wantMusic());
+    music.drain(kind => {
+      if (kind === 'meteor') { meteors.push({ x: W * (0.15 + Math.random() * 0.5), y: horizonY * (0.1 + Math.random() * 0.3), a: Math.PI * (0.15 + Math.random() * 0.2), born: t }); return; }
+      for (let k = 0; k < 6; k++) {                     // a note makes one visible star flare
+        const s = stars[(Math.random() * stars.length) | 0];
+        if (s.b > (kind === 'box' ? 0.3 : 0.15)) { s.flash = 1; break; }
+      }
+    });
 
     const hrs = simHours();
     const { night, twi } = light();
@@ -377,7 +576,7 @@
     const day = new Date(); day.setDate(day.getDate() + Math.floor(hrs / 24));
     const hh = Math.floor(hrs % 24), mm = Math.floor((hrs % 1) * 60);
     const speed = Math.round(SKY[mode].span * 60 / S[mode]);
-    const hud = `CAM-01  ${day.toISOString().slice(0, 10)}  ${String(hh).padStart(2, '0')}:${String(mm).padStart(2, '0')}  x${speed}  ${running ? (exposing ? 'REC * open' : 'REC *') : 'PAUSE ||'}`;
+    const hud = `CAM-01  ${day.toISOString().slice(0, 10)}  ${String(hh).padStart(2, '0')}:${String(mm).padStart(2, '0')}  x${speed}  ${running ? (exposing ? 'REC * open' : 'REC *') : 'PAUSE ||'}${music.playing ? '  ♪ ' + music.where() : ''}`;
     if (hudEl.textContent !== hud) hudEl.textContent = hud;
 
     gP.fill(0); gG.fill(0);
@@ -418,6 +617,11 @@
       s.pc = c; s.pr = r;
       if (c < 0 || r < 0 || c >= cols || r >= rows || r >= skyEnd[c]) continue;
       const vis = night + twi * 0.25;
+      if (s.flash > 0.02) {                               // flared by a note of the music
+        put(c, r, GI[s.flash > 0.5 ? '*' : '+'], lev(0.35 + 0.6 * s.flash), 7);
+        if (s.flash > 0.6) { put(c - 1, r, GI['-'], lev(0.35 * s.flash), 7); put(c + 1, r, GI['-'], lev(0.35 * s.flash), 7); }
+        s.flash *= 0.94; continue;
+      }
       if (vis < (1 - s.b) * 0.9) continue;
       const twk = 0.75 + 0.25 * Math.sin(ft * (2 + s.tw) + s.tw * 10) * calm;
       const v = Math.min(1, s.b * twk * (0.4 + 0.6 * vis));
